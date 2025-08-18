@@ -57,13 +57,16 @@ This project is deployed automatically. The following setup is required one time
 
 First, get a copy of the project and navigate into the directory.
 
+```bash
 git clone https://github.com/Ayoung9598/agent-on-aws.git
 cd agent-on-aws
+```
 
 ### Step 2: Configure GitHub Secrets
 
 For the deployment workflow to authenticate securely, you must add the following secrets to your GitHub repository settings under Settings > Secrets and variables > Actions:
 
+```bash
 AWS_ACCOUNT_ID: Your 12-digit AWS Account ID.
 
 AWS_REGION: The AWS region you want to deploy to (e.g., us-east-1).
@@ -71,6 +74,7 @@ AWS_REGION: The AWS region you want to deploy to (e.g., us-east-1).
 PINECONE_CONNECTION_STRING: The full connection string for your Pinecone index.
 
 PINECONE_API_KEY: Your secret Pinecone API key.
+```
 
 ### Step 3: Configure AWS to Trust GitHub
 
@@ -102,10 +106,12 @@ Send a POST request to the /invoke endpoint with the user's prompt.
 
 Example curl command:
 
+```bash
 curl -X POST \
  https://<api-id>.execute-api.<region>.amazonaws.com/invoke \
  -H 'Content-Type: application/json' \
  -d '{"prompt": "What are the key features of this product?"}'
+```
 
 ## Local Development and Testing
 
@@ -123,9 +129,11 @@ Deploy Once: You must have successfully deployed the stack to AWS at least once,
 
 Create a Test Event: Create a file named event.json in the project root with a sample API Gateway request:
 
+```bash
 {
 "body": "{\"prompt\": \"What is your primary function?\"}"
 }
+```
 
 Invoke Locally: In VS Code, open the template.yaml file. The AWS Toolkit extension will provide clickable [Invoke Locally] and [Debug Locally] links directly above the ApiFunction resource. Click one to run your function. The output will appear in your terminal.
 
