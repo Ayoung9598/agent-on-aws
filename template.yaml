@@ -1,0 +1,243 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  A production-ready CloudFormation template for an AI Agent.
+  It creates a Bedrock Agent, a Knowledge Base with a new S3 bucket and Pinecone,
+  a secure Lambda function, and an API Gateway. Secrets are managed via AWS Secrets Manager.
+
+Parameters:
+  AgentName:
+    Type: String
+    Default: "AIAgent"
+    Description: "Base name for the Bedrock Agent and related resources."
+  KnowledgeBaseName:
+    Type: String
+    Description: Name for the Amazon Bedrock Knowledge Base.
+    Default: AIAgentKnowledgeBase
+  PineconeConnectionString:
+    Type: String
+    Description: "The connection string for your Pinecone index (e.g., https://your-index.svc.environment.pinecone.io)."
+  PineconeApiKey:
+    Type: String
+    NoEcho: true
+    Description: "Your Pinecone API Key. This will be stored securely in AWS Secrets Manager."
+  PineconeNamespace:
+    Type: String
+    Default: ""
+    Description: "(Optional) The namespace within your Pinecone index."
+  DataSourceName:
+    Type: String
+    Description: Name for the Bedrock Knowledge Base Data Source.
+    Default: AIAgentDataSource
+  DataSourceDescription:
+    Type: String
+    Description: Description for the Bedrock Knowledge Base Data Source.
+    Default: "S3 data source for the AI Agent knowledge base."
+
+Resources:
+  # S3 Bucket (for Knowledge Base Documents)
+  KnowledgeBaseBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-kb-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: AIAgent
+
+  # Secret Manager (for Pinecone API Key)
+  PineconeApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: "Stores the API key for the Pinecone vector store."
+      Name: !Sub "${AgentName}-PineconeAPIKey"
+      SecretString: !Ref PineconeApiKey
+
+  # 3. IAM Roles
+  KnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AgentName}-KB-Role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: "bedrock.amazonaws.com" }
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: S3-Read-Access
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: ["s3:GetObject", "s3:ListBucket"]
+                Resource:
+                  [
+                    !GetAtt KnowledgeBaseBucket.Arn,
+                    !Sub "${!GetAtt KnowledgeBaseBucket.Arn}/*",
+                  ]
+        - PolicyName: Invoke-Embedding-Model
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: "bedrock:InvokeModel"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1"
+        - PolicyName: Secrets-Manager-Read-Access
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: "secretsmanager:GetSecretValue"
+                Resource: !Ref PineconeApiKeySecret
+      Tags:
+        - Key: Project
+          Value: AIAgent
+
+  BedrockAgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AgentName}-Agent-Role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: "bedrock.amazonaws.com" }
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: Agent-Permissions
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: "bedrock:InvokeModel"
+                Resource: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0"
+              - Effect: Allow
+                Action: "bedrock:Retrieve"
+                Resource: !GetAtt KnowledgeBase.KnowledgeBaseArn
+
+  # 4. Bedrock Knowledge Base & Data Source
+  KnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Ref KnowledgeBaseName
+      Description: !Sub "Knowledge base for the ${AgentName}."
+      RoleArn: !GetAtt KnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration:
+        Type: "VECTOR"
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1"
+      StorageConfiguration:
+        Type: PINECONE
+        PineconeConfiguration:
+          ConnectionString: !Ref PineconeConnectionString
+          CredentialsSecretArn: !Ref PineconeApiKeySecret
+          FieldMapping:
+            TextField: "text"
+            MetadataField: "metadata"
+          Namespace: !Ref PineconeNamespace
+
+  KnowledgeBaseDataSource:
+    Type: AWS::Bedrock::DataSource
+    Properties:
+      KnowledgeBaseId: !GetAtt KnowledgeBase.KnowledgeBaseId
+      Name: !Ref DataSourceName
+      Description: !Ref DataSourceDescription
+      DataSourceConfiguration:
+        Type: "S3"
+        S3Configuration:
+          BucketArn: !GetAtt KnowledgeBaseBucket.Arn
+
+  # 5. Bedrock Agent & Alias
+  AIAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Ref AgentName
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      Description: A customer support agent powered by Bedrock.
+      FoundationModel: "anthropic.claude-3-sonnet-20240229-v1:0"
+      Instruction: "You are a helpful and friendly AI assistant. You answer questions based on the provided knowledge base. If you cannot find an answer, you should say so."
+      KnowledgeBases:
+        - KnowledgeBaseId: !GetAtt KnowledgeBase.KnowledgeBaseId
+          Description: "Primary knowledge base for answering user questions."
+          KnowledgeBaseState: ENABLED
+
+  AIAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !GetAtt AIAgent.AgentId
+      AgentAliasName: "Production"
+      Description: Support alias for the Bedrock Agent.
+
+  # 6. Serverless API (Lambda & API Gateway)
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AgentName}-ApiHandler"
+      Handler: index.lambda_handler
+      Runtime: python3.11
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ["bedrock:InvokeAgent"]
+              Resource: !GetAtt AIAgentAlias.AgentAliasArn
+      Environment:
+        Variables:
+          BEDROCK_AGENT_ID: !GetAtt AIAgent.AgentId
+          BEDROCK_AGENT_ALIAS_ID: !GetAtt AIAgentAlias.AgentAliasId
+      InlineCode: |
+        import json
+        import boto3
+        import os
+        import uuid
+        bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
+        def lambda_handler(event, context):
+            try:
+                agent_id = os.environ['BEDROCK_AGENT_ID']
+                agent_alias_id = os.environ['BEDROCK_AGENT_ALIAS_ID']
+                body = json.loads(event.get('body', '{}'))
+                prompt = body.get('prompt')
+                if not prompt:
+                    return {'statusCode': 400, 'body': json.dumps({'error': 'Prompt is missing.'})}
+                session_id = str(uuid.uuid4())
+                response = bedrock_agent_runtime.invoke_agent(
+                    agentId=agent_id,
+                    agentAliasId=agent_alias_id,
+                    sessionId=session_id,
+                    inputText=prompt
+                )
+                completion = ""
+                for event_chunk in response.get('completion', []):
+                    chunk = event_chunk.get('chunk', {})
+                    completion += chunk.get('bytes', b'').decode('utf-8')
+                return {
+                    'statusCode': 200,
+                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                    'body': json.dumps({'response': completion})
+                }
+            except Exception as e:
+                print(f"Error: {e}")
+                return {'statusCode': 500, 'body': json.dumps({'error': 'Internal server error.'})}
+      Events:
+        ApiEvent:
+          Type: HttpApi
+          Properties:
+            Path: /invoke
+            Method: post
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL for your agent"
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/invoke"
+  KnowledgeBaseS3BucketName:
+    Description: "Name of the S3 bucket for knowledge base documents"
+    Value: !Ref KnowledgeBaseBucket
+  BedrockAgentId:
+    Description: "ID of the Amazon Bedrock Agent"
+    Value: !GetAtt AIAgent.AgentId
