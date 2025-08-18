@@ -1,4 +1,5 @@
-AI Agent with Bedrock, Pinecone, and Serverless API
+## AI Agent with Bedrock, Pinecone, and Serverless API
+
 This project provides a complete, production-ready backend for an AI agent powered by Amazon Bedrock. The agent leverages a Bedrock Knowledge Base with a Pinecone vector store to answer questions based on documents you provide in an S3 bucket.
 
 The entire infrastructure is defined using the AWS Serverless Application Model (SAM) and is deployed automatically via a secure GitHub Actions CI/CD pipeline.
