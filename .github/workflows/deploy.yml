@@ -1,0 +1,63 @@
+# This is the name of the workflow as it will appear in the "Actions" tab of your GitHub repository.
+name: Deploy AIAgent to AWS
+
+# This section defines the trigger for the workflow.
+# It will run automatically on every push to the 'main' branch.
+on:
+  push:
+    branches:
+      - main
+
+# This section defines the permissions the workflow needs.
+# It's required for secure OIDC authentication with AWS.
+permissions:
+  id-token: write # Required to get the OIDC token from GitHub.
+  contents: read # Required to check out the repository code.
+
+jobs:
+  # A single job in this workflow, named 'deploy'.
+  deploy:
+    # The type of virtual machine to run the job on. 'ubuntu-latest' is standard.
+    runs-on: ubuntu-latest
+
+    # These are the sequential steps that the job will execute.
+    steps:
+      # Step 1: Check out your repository code
+      # This action downloads your code onto the runner so the workflow can access it.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Configure AWS Credentials using OIDC
+      # This is the secure way to authenticate with AWS. It exchanges a short-lived token
+      # from GitHub for temporary credentials from an IAM Role in your AWS account.
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # The AWS region where your resources will be deployed.
+          aws-region: ${{ secrets.AWS_REGION }}
+          # The ARN of the IAM Role that GitHub Actions is allowed to assume.
+          # You will create this role in your AWS account.
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubAction-AIAgent-DeployRole
+          # A friendly name for the session in AWS CloudTrail logs.
+          role-session-name: GitHubActionsDeploySession
+
+      # Step 3: Set up the AWS SAM CLI
+      # The SAM CLI is a tool for building and deploying serverless applications.
+      - name: Setup SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      # Step 4: Build the SAM application
+      # This command prepares your template and code for deployment.
+      - name: Build SAM Application
+        run: sam build
+
+      # Step 5: Deploy the application to AWS CloudFormation
+      # This command packages and deploys your resources.
+      - name: Deploy SAM Application
+        run: |
+          sam deploy --no-confirm-changeset --no-fail-on-empty-changeset \
+            --stack-name AIAgent-Stack \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides \
+              PineconeConnectionString='"${{ secrets.PINECONE_CONNECTION_STRING }}"' \
+              PineconeApiKey='"${{ secrets.PINECONE_API_KEY }}"'
