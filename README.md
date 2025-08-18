@@ -1,66 +1,133 @@
-# AWS Bedrock AI Agent with Serverless API
+AI Agent with Bedrock, Pinecone, and Serverless API
+This project provides a complete, production-ready backend for an AI agent powered by Amazon Bedrock. The agent leverages a Bedrock Knowledge Base with a Pinecone vector store to answer questions based on documents you provide in an S3 bucket.
 
-This project provides a complete backend for an AI agent powered by Amazon Bedrock. It uses a Knowledge Base with an S3 data source and a Pinecone vector store. The agent is exposed via a serverless API using Amazon API Gateway and AWS Lambda. All infrastructure is provisioned using AWS CloudFormation.
+The entire infrastructure is defined using the AWS Serverless Application Model (SAM) and is deployed automatically via a secure GitHub Actions CI/CD pipeline.
 
 ## Architecture
 
-- **API Gateway:** Provides an HTTP endpoint to interact with the agent.
-- **AWS Lambda:** Contains the business logic to invoke the Bedrock Agent.
-- **Amazon Bedrock Agent:** The core AI agent that processes user requests.
-- **Amazon Bedrock Knowledge Base:** Provides the agent with domain-specific knowledge.
-- **Amazon S3:** Stores the documents for the Knowledge Base.
-- **Pinecone:** Acts as the vector store for the Knowledge Base.
+The architecture is fully serverless and event-driven. The CI/CD pipeline automates the deployment of the AWS resources.
+
+GitHub Actions (CI/CD): Pushing to the main branch triggers the deployment workflow.
+
+AWS CloudFormation: The workflow deploys the template.yaml file, provisioning all AWS resources.
+
+API Gateway (HTTP API): Provides a public, serverless REST endpoint.
+
+AWS Lambda: The core function that receives API requests and securely invokes the Bedrock Agent.
+
+Amazon Bedrock Agent: Orchestrates the interaction, using a foundation model to understand the user's prompt.
+
+Bedrock Knowledge Base: The agent queries the knowledge base to find relevant information.
+
+Pinecone: The vector store that enables fast, semantic search over your documents.
+
+Amazon S3: The bucket where you upload your source documents (e.g., PDFs, TXT files) for the knowledge base.
+
+AWS Secrets Manager: Securely stores the Pinecone API key for the knowledge base to use.
+
+IAM Roles: Provide fine-grained, least-privilege permissions for each service to interact securely.
 
 ## Prerequisites
 
 - AWS Account
 - AWS CLI configured
 - Python 3.9+
-- An S3 bucket for your Knowledge Base data
 - A Pinecone account and API key
+
+## Features
+
+Fully Automated Deployment: CI/CD pipeline using GitHub Actions for hands-off deployments.
+
+Infrastructure as Code (IaC): All AWS resources are defined in a single SAM/CloudFormation template.
+
+Secure by Design: Uses AWS Secrets Manager for API keys and secure OIDC authentication between GitHub and AWS.
+
+Scalable & Serverless: Built entirely on managed AWS services that scale automatically.
+
+RAG Enabled: Implements the Retrieval-Augmented Generation pattern using Bedrock Knowledge Base and Pinecone.
+
+Ready for Frontend: Includes CORS configuration in the API Gateway for easy integration with a web application.
 
 ## Deployment
 
-1.  **Clone the repository:**
+This project is deployed automatically. The following setup is required one time.
 
-    ```bash
-    git clone <your-repo-url>
-    cd <your-repo-name>
-    ```
+### Step 1: Fork and Clone the Repository
 
-2.  **Package the Lambda function:**
-    _(Instructions on how to create a zip file for the lambda function if it has dependencies)_
+First, get a copy of the project and navigate into the directory.
 
-3.  **Deploy the CloudFormation stack:**
-    ```bash
-    aws cloudformation deploy \
-      --template-file template.yaml \
-      --stack-name my-bedrock-agent-stack \
-      --capabilities CAPABILITY_IAM \
-      --parameter-overrides \
-        PineconeApiKey=<your-pinecone-api-key> \
-        PineconeEnvironment=<your-pinecone-environment> \
-        PineconeIndexName=<your-pinecone-index-name> \
-        KnowledgeBaseBucketName=<your-s3-bucket-name>
-    ```
+git clone https://github.com/Ayoung9598/agent-on-aws.git
+cd agent-on-aws
+
+### Step 2: Configure GitHub Secrets
+
+For the deployment workflow to authenticate securely, you must add the following secrets to your GitHub repository settings under Settings > Secrets and variables > Actions:
+
+AWS_ACCOUNT_ID: Your 12-digit AWS Account ID.
+
+AWS_REGION: The AWS region you want to deploy to (e.g., us-east-1).
+
+PINECONE_CONNECTION_STRING: The full connection string for your Pinecone index.
+
+PINECONE_API_KEY: Your secret Pinecone API key.
+
+### Step 3: Configure AWS to Trust GitHub
+
+You must set up an OIDC connection in your AWS account to allow the GitHub Actions workflow to assume a role and deploy resources. Follow the official AWS guide for configuring OIDC with GitHub Actions.
+
+Key Points:
+
+The IAM Role you create in AWS must be named GitHubAction-AIAgent-DeployRole to match the workflow file.
+
+This role needs permissions to deploy the resources in the template.yaml file (CloudFormation, S3, Bedrock, Lambda, IAM, etc.).
+
+### Step 4: Push to main
+
+Once the secrets and the AWS role are configured, every git push to the main branch will automatically trigger the GitHub Actions workflow to build and deploy your application.
+
+## After Deployment: Using Your Agent
+
+Find Your S3 Bucket: Go to the AWS CloudFormation console, select the AIAgent-Stack, and look in the Outputs tab for the KnowledgeBaseS3BucketName.
+
+Upload Documents: Upload your knowledge documents (PDFs, TXT, etc.) to this S3 bucket.
+
+Sync Knowledge Base: In the Amazon Bedrock console, navigate to Knowledge Bases, select the one created by the stack, and click Sync to ingest your new documents.
+
+Call the API: Use the ApiEndpoint URL from the CloudFormation outputs to interact with your agent.
 
 ## API Usage
 
-Once deployed, you can interact with the agent via the API Gateway endpoint provided in the CloudFormation stack outputs.
+Send a POST request to the /invoke endpoint with the user's prompt.
 
-**Endpoint:** `POST /invoke`
-
-**Request Body:**
-
-```json
-{
-  "prompt": "Your question for the agent"
-}
-
-Example with curl:
+Example curl command:
 
 curl -X POST \
-  https://<api-id>.execute-api.<region>[.amazonaws.com/invoke](https://.amazonaws.com/invoke) \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt": "What are the latest features of Amazon Bedrock?"}'
-```
+ https://<api-id>.execute-api.<region>.amazonaws.com/invoke \
+ -H 'Content-Type: application/json' \
+ -d '{"prompt": "What are the key features of this product?"}'
+
+## Local Development and Testing
+
+You can test your Lambda function locally without deploying. This provides a rapid feedback loop for code changes.
+
+Prerequisites:
+
+AWS SAM CLI
+
+Docker Desktop (must be running)
+
+Steps:
+
+Deploy Once: You must have successfully deployed the stack to AWS at least once, as local testing makes a live call to the already-existing Bedrock agent.
+
+Create a Test Event: Create a file named event.json in the project root with a sample API Gateway request:
+
+{
+"body": "{\"prompt\": \"What is your primary function?\"}"
+}
+
+Invoke Locally: In VS Code, open the template.yaml file. The AWS Toolkit extension will provide clickable [Invoke Locally] and [Debug Locally] links directly above the ApiFunction resource. Click one to run your function. The output will appear in your terminal.
+
+## Contact
+
+If you have any questions, suggestions, or feedback, please feel free to contact the project owner at [abiolateslim1@gmail.com](mailto:abiolateslim1@gmail.com)
