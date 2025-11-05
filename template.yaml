@@ -180,8 +180,9 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub "${AgentName}-ApiHandler"
-      Handler: index.lambda_handler
+      Handler: agent_handler.lambda_handler
       Runtime: python3.11
+      CodeUri: src/lambda/
       Policies:
         - Statement:
             - Effect: Allow
@@ -191,39 +192,6 @@ Resources:
         Variables:
           BEDROCK_AGENT_ID: !GetAtt AIAgent.AgentId
           BEDROCK_AGENT_ALIAS_ID: !GetAtt AIAgentAlias.AgentAliasId
-      InlineCode: |
-        import json
-        import boto3
-        import os
-        import uuid
-        bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
-        def lambda_handler(event, context):
-            try:
-                agent_id = os.environ['BEDROCK_AGENT_ID']
-                agent_alias_id = os.environ['BEDROCK_AGENT_ALIAS_ID']
-                body = json.loads(event.get('body', '{}'))
-                prompt = body.get('prompt')
-                if not prompt:
-                    return {'statusCode': 400, 'body': json.dumps({'error': 'Prompt is missing.'})}
-                session_id = str(uuid.uuid4())
-                response = bedrock_agent_runtime.invoke_agent(
-                    agentId=agent_id,
-                    agentAliasId=agent_alias_id,
-                    sessionId=session_id,
-                    inputText=prompt
-                )
-                completion = ""
-                for event_chunk in response.get('completion', []):
-                    chunk = event_chunk.get('chunk', {})
-                    completion += chunk.get('bytes', b'').decode('utf-8')
-                return {
-                    'statusCode': 200,
-                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                    'body': json.dumps({'response': completion})
-                }
-            except Exception as e:
-                print(f"Error: {e}")
-                return {'statusCode': 500, 'body': json.dumps({'error': 'Internal server error.'})}
       Events:
         ApiEvent:
           Type: HttpApi
